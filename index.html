@@ -1,0 +1,661 @@
+
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Circtec — Belgium Network (v1)</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<style>
+  html,body,#map { height:100%; margin:0; }
+  .brand { position:absolute; top:0; left:0; right:0; height:46px; background:#0b5cff; color:#fff;
+           display:flex; align-items:center; gap:8px; padding:0 12px; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+           font-weight:600; z-index:1200; box-shadow:0 2px 8px rgba(0,0,0,.15); }
+  #map { position:absolute; top:46px; bottom:0; left:0; right:0; }
+  .panel { position:absolute; top:56px; left:8px; z-index:1100; background:#fff; border:1px solid #e9e9e9; border-radius:10px;
+           box-shadow:0 2px 12px rgba(0,0,0,.18); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; font-size:14px;
+           width:860px; max-width:calc(100% - 16px); overflow:hidden; }
+  .panel-header { display:flex; align-items:center; justify-content:space-between; background:#f7f7f7; border-bottom:1px solid #eee; padding:8px 10px; }
+  .panel-toggle { background:#0b5cff; color:#fff; border:none; border-radius:8px; padding:6px 10px; cursor:pointer; }
+  .panel-body { padding:10px 12px; display:block; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+  .btn { padding:6px 10px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; }
+  .input,.select { padding:6px 8px; border:1px solid #ddd; border-radius:8px; background:#fff; }
+  .small { font-size:12px; color:#555; }
+  .card { border:1px solid #eee; border-radius:8px; padding:8px; background:#fff; }
+  .grid4 { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; width:100%; }
+  table.summary { border-collapse:collapse; width:100%; font-size:13px; }
+  table.summary th, table.summary td { border:1px solid #e5e5e5; padding:6px 8px; text-align:right; }
+  table.summary th:first-child, table.summary td:first-child { text-align:left; }
+</style>
+</head>
+<body>
+<div class="brand">Circtec — Belgium Network</div>
+<div id="map"></div>
+
+<div class="panel">
+  <div class="panel-header">
+    <div><b>Controls & Cost Model</b> — <span id="hqBadge" class="small">HQ: initialising…</span></div>
+    <button id="togglePanelBtn" class="panel-toggle" aria-expanded="true" aria-controls="panelBody">Hide panel ▲</button>
+  </div>
+  <div id="panelBody" class="panel-body">
+    <div class="row">
+      <label><input type="radio" name="view" value="heat" checked> Heat map</label>
+      <label><input type="radio" name="view" value="markers"> Marker clusters</label>
+      <span class="small">Garages: <span id="count">0</span></span>
+    </div>
+
+    <div class="row">
+      <select id="countyFilter" class="select"><option value="">All counties</option></select>
+      <input id="searchBox" class="input" type="search" placeholder="Search name/address…" style="flex:1; min-width:160px">
+      <input id="withinKm" class="input" type="number" min="0" step="1" placeholder="Within (km)" style="width:120px">
+      <button id="clearFilters" class="btn">Clear</button>
+      <button id="exportCsvBtn" class="btn">Export CSV</button>
+    </div>
+
+    <hr>
+    <div><b>HQ & Rings</b></div>
+    <div class="row">
+      <input id="hqAddress" class="input" type="text" value="" placeholder="Set HQ address (optional)..." style="flex:1; min-width:260px">
+      <button id="geocodeHqBtn" class="btn">Try Geocode</button>
+      <button id="clickHqBtn" class="btn">Set HQ by map click</button>
+      <input id="hqLat" class="input" type="number" step="0.000001" placeholder="HQ lat" style="width:140px">
+      <input id="hqLon" class="input" type="number" step="0.000001" placeholder="HQ lon" style="width:140px">
+      <button id="setHqBtn" class="btn">Set lat/lon</button>
+    </div>
+    <div class="row">
+      <div class="grid4">
+        <div class="card"><div>Ring 1 (km)</div><input id="ring1km" class="input" type="number" value="50"></div>
+        <div class="card"><div>Ring 2 (km)</div><input id="ring2km" class="input" type="number" value="100"></div>
+        <div class="card"><div>Ring 3 (km)</div><input id="ring3km" class="input" type="number" value="150"></div>
+        <div class="card"><label><input type="checkbox" id="toggleRings" checked> Show rings</label><br><button id="applyRingsBtn" class="btn" style="margin-top:4px">Apply</button><button id="zoomRingsBtn" class="btn" style="margin-top:4px">Zoom</button></div>
+      </div>
+    </div>
+
+    <hr>
+    <div class="row">
+      <div class="card" style="flex:1">
+        <b>Cost inputs</b>
+        <div class="grid4" style="margin-top:6px">
+          <div><div>Fuel €/km</div><input id="fuelPerKm" class="input" type="number" step="0.01" value="0.46"></div>
+          <div><div>Fixed €/km</div><input id="fixedPerKm" class="input" type="number" step="0.01" value="0.84"></div>
+          <div><div>Per-stop €/pickup</div><input id="perStop" class="input" type="number" step="1" value="0"></div>
+          <div><div>Pickups/site/year</div><input id="pickupsPerYear" class="input" type="number" step="1" value="1"></div>
+        </div>
+      </div>
+      <div class="card" style="flex:1">
+        <b>Ring cost (quick)</b>
+        <div class="row" style="margin-top:6px">
+          <label>Ring km <input id="ringQueryKm" class="input" type="number" value="100" style="width:90px"></label>
+          <label><input type="radio" name="ringMode" value="avg" checked> Band average</label>
+          <label><input type="radio" name="ringMode" value="edge"> Ring edge</label>
+          <button id="calcRingCost" class="btn">Calculate</button>
+        </div>
+        <div id="ringCostOut" class="small" style="margin-top:6px"></div>
+      </div>
+    </div>
+
+       <div class="row">
+      <div class="card" style="width:100%">
+        <b>Collection Cost Summary</b>
+        <table class="summary" id="costTable" style="margin-top:6px">
+          <thead>
+            <tr>
+              <th>Band</th>
+              <th>Sites</th>
+              <th>Avg dist (km)</th>
+              <th>€/trip/site (return)</th>
+              <th>€/t (one way)</th>
+              <th>€/year (band)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>0–R1</td><td>–</td><td>–</td><td>–</td><td>–</td><td>–</td></tr>
+            <tr><td>R1–R2</td><td>–</td><td>–</td><td>–</td><td>–</td><td>–</td></tr>
+            <tr><td>R2–R3</td><td>–</td><td>–</td><td>–</td><td>–</td><td>–</td></tr>
+            <tr><td>&gt;R3</td><td>–</td><td>–</td><td>–</td><td>–</td><td>–</td></tr>
+            <tr><td><b>Total</b></td><td>–</td><td></td><td></td><td></td><td>–</td></tr>
+          </tbody>
+        </table>
+        <div class="row"><button id="exportCostBtn" class="btn">Export cost summary (CSV)</button></div>
+      </div>
+    </div>
+
+    <!-- NEW: HQ -> Ports export leg -->
+    <div class="row">
+      <div class="card" style="width:100%">
+        <b>HQ → Ports (export leg)</b>
+        <div class="row" style="margin-top:6px">
+          <label>
+            Payload per truck (t)
+            <input id="payloadT" class="input" type="number" step="1" value="24" style="width:90px">
+          </label>
+          <label>
+            <input type="checkbox" id="assumeBackhaul" checked>
+            Assume backhaul (loaded both ways)
+          </label>
+          <label>
+            <input type="checkbox" id="includePerStopPort" checked>
+            Include per-stop cost
+          </label>
+          <button id="updatePortsBtn" class="btn">Update ports</button>
+          <button id="exportPortsBtn" class="btn">Export ports (CSV)</button>
+        </div>
+
+        <table class="summary" id="portsTable" style="margin-top:6px">
+          <thead>
+            <tr>
+              <th>Port</th>
+              <th>Distance HQ–port (km)</th>
+              <th>€/trip (return)</th>
+              <th>€/t (one way)</th>
+            </tr>
+          </thead>
+          <tbody id="portsTableBody"></tbody>
+        </table>
+
+        <div class="small" style="margin-top:6px">
+          €/trip (return) uses 2×distance and current Fuel + Fixed €/km.
+          €/t (one way) divides by payload (or 2×payload if backhaul is ticked).
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Leaflet + plugins -->
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+<!-- Your garages dataset (defines: const GARAGES = [...] ) -->
+<script src="garages_block.js?v=1883"></script>
+
+
+<!-- Your map app code (must come AFTER garages_block.js) -->
+<script>
+/* ==== START APP ==== */
+
+const DEFAULT_HQ = [51.167356, 5.012402]; // Belgium transfer depot
+
+
+const PORTS = [
+  { name: "Belgium Transfer Depot", lat: 51.167356, lon: 5.012402 },
+  { name: "Granuband (Amsterdam)",  lat: 52.4224922, lon: 4.7883236 },
+];
+
+
+// ----- Panel toggle -----
+const panelBody = document.getElementById('panelBody');
+const togglePanelBtn = document.getElementById('togglePanelBtn');
+let panelOpen = true;
+togglePanelBtn.addEventListener('click', function () {
+  panelOpen = !panelOpen;
+  panelBody.style.display = panelOpen ? 'block' : 'none';
+  togglePanelBtn.textContent = panelOpen ? 'Hide panel ▲' : 'Show panel ▼';
+  togglePanelBtn.setAttribute('aria-expanded', panelOpen ? 'true' : 'false');
+});
+
+// ----- Map -----
+const map = L.map('map').setView(DEFAULT_HQ, 8);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 18,
+  attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
+
+// Helper: circle marker
+function mCircle(lat, lon, color, r) {
+  return L.circleMarker([lat, lon], {
+    radius: r || 6,
+    color: color || '#2e7d32',
+    weight: 2,
+    fillColor: color || '#2e7d32',
+    fillOpacity: 0.9
+  });
+}
+
+// Haversine helpers
+function toRad(d) { return d * Math.PI / 180; }
+function haversineKm(a, b) {
+  if (!a || !b) return null;
+  const R = 6371;
+  const dLat = toRad(b[0] - a[0]);
+  const dLon = toRad(b[1] - a[1]);
+  const s1 = Math.sin(dLat / 2), s2 = Math.sin(dLon / 2);
+  const aa = s1 * s1 + Math.cos(toRad(a[0])) * Math.cos(toRad(b[0])) * s2 * s2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(aa)));
+}
+
+function hasCoords(r) {
+  return r &&
+    typeof r.lat === 'number' && !isNaN(r.lat) &&
+    typeof r.lon === 'number' && !isNaN(r.lon);
+}
+
+function garageName(r) {
+  return (r && (r.name || r.trading_as || r.registered_name)) ? (r.name || r.trading_as || r.registered_name) : '(Unnamed)';
+}
+function garageAddress(r) {
+  return (r && (r.address || r.full_address)) ? (r.address || r.full_address) : '';
+}
+function garageArea(r) {
+  // Belgium dataset uses city; Ireland dataset uses county
+  return (r && (r.county || r.city)) ? (r.county || r.city) : '';
+}
+function garageSearchBlob(r) {
+  return [
+    garageName(r),
+    garageAddress(r),
+    r?.city || '',
+    r?.postcode || '',
+    r?.categories || '',
+    r?.county || ''
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+// Data layers + state
+const heat = L.heatLayer([], { radius: 20, blur: 25, maxZoom: 11 });
+const markers = L.markerClusterGroup();
+
+let HQ = DEFAULT_HQ.slice();
+let current = (typeof GARAGES !== 'undefined' && Array.isArray(GARAGES)) ? GARAGES.slice() : [];
+
+// UI elements (match IDs in HTML)
+const countEl = document.getElementById('count');
+const hqBadge = document.getElementById('hqBadge');
+const countySel = document.getElementById('countyFilter');
+const searchBox = document.getElementById('searchBox');
+const withinKm = document.getElementById('withinKm');
+const clearBtn = document.getElementById('clearFilters');
+const exportBtn = document.getElementById('exportCsvBtn');
+
+const hqAddrInput = document.getElementById('hqAddress');
+const setLatLonBtn = document.getElementById('setHqBtn');
+const tryGeocodeBtn = document.getElementById('geocodeHqBtn');
+const setHqByClickBtn = document.getElementById('clickHqBtn');
+
+const ring1El = document.getElementById('ring1km');
+const ring2El = document.getElementById('ring2km');
+const ring3El = document.getElementById('ring3km');
+const showRingsEl = document.getElementById('toggleRings');
+const applyRingsBtn = document.getElementById('applyRingsBtn');
+const zoomBtn = document.getElementById('zoomRingsBtn');
+
+const fuelEl = document.getElementById('fuelPerKm');
+const fixedEl = document.getElementById('fixedPerKm');
+const perStopEl = document.getElementById('perStop');
+const pickupsEl = document.getElementById('pickupsPerYear');
+
+const payloadEl = document.getElementById('payloadT');
+const backhaulEl = document.getElementById('assumeBackhaul');
+const includePerStopEl = document.getElementById('includePerStopPort');
+const updatePortsBtn = document.getElementById('updatePortsBtn');
+const exportPortsBtn = document.getElementById('exportPortsBtn');
+
+// Rings group
+const ringsGroup = L.layerGroup().addTo(map);
+let hqMarker = null;
+
+// ----- Core compute + render -----
+function computeDistances() {
+  if (!HQ) return;
+  (GARAGES || []).forEach(function (r) {
+    if (!hasCoords(r)) { r.distance_km = NaN; return; }
+    const d = haversineKm(HQ, [r.lat, r.lon]);
+    r.distance_km = (d == null || isNaN(d)) ? NaN : d;
+  });
+}
+
+function setHqBadge() {
+  if (!HQ) {
+    hqBadge.textContent = 'HQ: initialising...';
+    return;
+  }
+  hqBadge.textContent = `HQ ✓ (${HQ[0].toFixed(5)}, ${HQ[1].toFixed(5)})`;
+}
+
+function render() {
+  const pts = current.filter(hasCoords);
+
+  // Update count labels
+  if (countEl) countEl.textContent = current.length;
+
+  // Heat
+  heat.setLatLngs(pts.map(r => [r.lat, r.lon]));
+
+  // Markers
+  markers.clearLayers();
+  pts.forEach(function (r) {
+    const name = garageName(r);
+    const addr = garageAddress(r);
+    const area = garageArea(r);
+    const cats = r.categories || '';
+    const distText = (r.distance_km != null && !isNaN(r.distance_km))
+      ? `<br/><b>${r.distance_km.toFixed(2)} km from HQ</b>` : '';
+
+    const html =
+      `<div style="min-width:240px">
+        <b>${name}</b>
+        ${addr ? `<br/>${addr}` : ''}
+        ${area ? `<br/><small>${area}</small>` : ''}
+        ${cats ? `<br/><small>${cats}</small>` : ''}
+        ${distText}
+      </div>`;
+
+    markers.addLayer(mCircle(r.lat, r.lon, '#2e7d32', 6).bindPopup(html));
+  });
+}
+
+// View toggle: heat vs markers
+document.querySelectorAll('input[name="view"]').forEach(function (el) {
+  el.addEventListener('change', function (e) {
+    if (e.target.value === 'heat') {
+      map.addLayer(heat);
+      if (map.hasLayer(markers)) map.removeLayer(markers);
+    } else {
+      if (map.hasLayer(heat)) map.removeLayer(heat);
+      map.addLayer(markers);
+    }
+  });
+});
+
+// Default view: heat map
+map.addLayer(heat);
+
+// ----- Filters -----
+function applyFilters() {
+  const county = countySel ? countySel.value : '';
+  const q = (searchBox ? searchBox.value : '').trim().toLowerCase();
+  const km = parseFloat(withinKm ? withinKm.value : '');
+
+  current = (GARAGES || []).filter(function (r) {
+    const areaVal = garageArea(r);
+
+    if (county && areaVal !== county) return false;
+
+    if (q) {
+      const blob = garageSearchBlob(r);
+      if (!blob.includes(q)) return false;
+    }
+
+    if (!isNaN(km)) {
+      if (r.distance_km == null || isNaN(r.distance_km) || r.distance_km > km) return false;
+    }
+
+    return true;
+  });
+
+  render();
+  updateCostSummary();
+  renderPortsTable();
+}
+
+if (countySel) countySel.addEventListener('change', applyFilters);
+if (searchBox) searchBox.addEventListener('input', applyFilters);
+if (withinKm) withinKm.addEventListener('input', applyFilters);
+
+if (clearBtn) clearBtn.addEventListener('click', function () {
+  if (countySel) countySel.value = '';
+  if (searchBox) searchBox.value = '';
+  if (withinKm) withinKm.value = '';
+  applyFilters();
+});
+
+// ----- Rings -----
+function getRings() {
+  const r1 = parseFloat(ring1El.value || '50');
+  const r2 = parseFloat(ring2El.value || '100');
+  const r3 = parseFloat(ring3El.value || '150');
+  return [r1, r2, r3];
+}
+
+function drawRings() {
+  ringsGroup.clearLayers();
+  if (!HQ) return;
+
+  if (hqMarker) map.removeLayer(hqMarker);
+  hqMarker = L.circleMarker(HQ, { radius: 8, color: '#c62828', fillColor: '#c62828', fillOpacity: 0.95 }).addTo(map);
+
+  if (!showRingsEl.checked) return;
+
+  const [r1, r2, r3] = getRings();
+  [r1, r2, r3].forEach(function (rk) {
+    L.circle(HQ, { radius: rk * 1000, color: '#1e88e5', fillOpacity: 0 }).addTo(ringsGroup);
+  });
+}
+
+if (applyRingsBtn) applyRingsBtn.addEventListener('click', function () {
+  drawRings();
+  computeDistances();
+  applyFilters();
+});
+
+if (zoomBtn) zoomBtn.addEventListener('click', function () {
+  const [r1, r2, r3] = getRings();
+  map.fitBounds(L.circle(HQ, { radius: r3 * 1000 }).getBounds(), { padding: [20, 20] });
+});
+
+// ----- Set HQ by lat/lon -----
+if (setLatLonBtn) setLatLonBtn.addEventListener('click', function () {
+  const lat = parseFloat(document.getElementById('hqLat').value);
+  const lon = parseFloat(document.getElementById('hqLon').value);
+  if (isNaN(lat) || isNaN(lon)) return;
+  HQ = [lat, lon];
+  setHqBadge();
+  drawRings();
+  computeDistances();
+  applyFilters();
+});
+
+// ----- Set HQ by map click -----
+let clickMode = false;
+if (setHqByClickBtn) setHqByClickBtn.addEventListener('click', function () {
+  clickMode = !clickMode;
+  setHqByClickBtn.textContent = clickMode ? 'Click map to set HQ...' : 'Set HQ by map click';
+});
+
+map.on('click', function (e) {
+  if (!clickMode) return;
+  HQ = [e.latlng.lat, e.latlng.lng];
+  clickMode = false;
+  setHqByClickBtn.textContent = 'Set HQ by map click';
+  setHqBadge();
+  drawRings();
+  computeDistances();
+  applyFilters();
+});
+
+// ----- Simple geocode (Nominatim) for HQ input -----
+async function geocodeAddr(addr) {
+  const url = 'https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(addr);
+  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  const j = await res.json();
+  if (!Array.isArray(j) || !j.length) return null;
+  return [parseFloat(j[0].lat), parseFloat(j[0].lon)];
+}
+
+if (tryGeocodeBtn) tryGeocodeBtn.addEventListener('click', async function () {
+  const addr = (hqAddrInput ? hqAddrInput.value : '').trim();
+  if (!addr) return;
+  try {
+    const ll = await geocodeAddr(addr);
+    if (!ll || isNaN(ll[0]) || isNaN(ll[1])) return;
+    HQ = ll;
+    setHqBadge();
+    drawRings();
+    computeDistances();
+    applyFilters();
+  } catch (e) {}
+});
+
+// ----- Costs + Bands -----
+function bands() {
+  const [R1, R2, R3] = getRings();
+  const b = [[], [], [], []];
+  current.forEach(function (g) {
+    const d = g.distance_km;
+    if (d == null || isNaN(d)) return;
+    if (d <= R1) b[0].push(d);
+    else if (d <= R2) b[1].push(d);
+    else if (d <= R3) b[2].push(d);
+    else b[3].push(d);
+  });
+  return { r: [R1, R2, R3], b };
+}
+
+function mean(arr) {
+  if (!arr.length) return NaN;
+  return arr.reduce((a, c) => a + c, 0) / arr.length;
+}
+
+function updateCostSummary() {
+  const { b } = bands();
+
+  const fuel    = parseFloat(fuelEl?.value || '0');
+  const fixed   = parseFloat(fixedEl?.value || '0');
+  const perStop = parseFloat(perStopEl?.value || '0');
+  const pickups = Math.max(1, parseFloat(pickupsEl?.value || '1'));
+
+  const rows = document.querySelectorAll('#costTable tbody tr');
+
+  let totalSites = 0;
+  let totalYear = 0;
+
+  rows.forEach((row, i) => {
+    if (i > 3) return; // skip "Total" row if present
+
+    const distances = b[i] || [];
+    const sites = distances.length;
+    totalSites += sites;
+
+    const avg = mean(distances);
+    const tripEur = isNaN(avg) ? NaN : (2 * avg * (fuel + fixed) + perStop);
+    const perT = isNaN(tripEur) ? NaN : (tripEur / pickups);
+
+    const eurYearBand = isNaN(tripEur) ? 0 : (tripEur * sites);
+    totalYear += eurYearBand;
+
+    const tds = row.querySelectorAll('td');
+    if (tds.length >= 6) {
+      tds[1].textContent = sites ? String(sites) : '-';
+      tds[2].textContent = isNaN(avg) ? '-' : avg.toFixed(1);
+      tds[3].textContent = isNaN(tripEur) ? '-' : ('€' + tripEur.toFixed(2));
+      tds[4].textContent = isNaN(perT) ? '-' : ('€' + perT.toFixed(2));
+      tds[5].textContent = sites
+        ? ('€' + eurYearBand.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+        : '-';
+    }
+  });
+
+  // Totals (only update if the IDs exist)
+  const totalSitesEl = document.getElementById('totalSites');
+  const totalYearEl  = document.getElementById('totalYear');
+
+  if (totalSitesEl) totalSitesEl.textContent = totalSites ? String(totalSites) : '-';
+  if (totalYearEl)  totalYearEl.textContent  = totalSites
+    ? ('€' + totalYear.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+    : '-';
+}
+
+
+// ----- Export CSV (garages) -----
+if (exportBtn) exportBtn.addEventListener('click', function () {
+  const headers = ['Name','Address','Area','City','Postcode','Categories','lat','lon','distance_km'];
+  const rows = current.map(function (r) {
+    return [
+      garageName(r),
+      garageAddress(r),
+      garageArea(r),
+      r.city || '',
+      r.postcode || '',
+      r.categories || '',
+      (hasCoords(r) ? r.lat : ''),
+      (hasCoords(r) ? r.lon : ''),
+      (r.distance_km != null && !isNaN(r.distance_km) ? r.distance_km.toFixed(2) : '')
+    ];
+  });
+
+  const csv = [headers].concat(rows)
+    .map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(','))
+    .join('\n');
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'garages_filtered.csv';
+  a.click();
+});
+
+// ----- Ports table -----
+function renderPortsTable() {
+  const fuel = parseFloat(fuelEl.value || '0');
+  const fixed = parseFloat(fixedEl.value || '0');
+  const payload = parseFloat(payloadEl.value || '24');
+  const backhaul = backhaulEl.checked;
+  const includePerStop = includePerStopEl.checked;
+  const perStop = parseFloat(perStopEl.value || '0');
+
+  const tbody = document.querySelector('#portsTable tbody');
+  tbody.innerHTML = '';
+
+  PORTS.forEach(function (p) {
+    const d = haversineKm(HQ, [p.lat, p.lon]);
+    const roundTripKm = (d == null || isNaN(d)) ? NaN : (2 * d);
+    const tripEur = isNaN(roundTripKm) ? NaN : (roundTripKm * (fuel + fixed) + (includePerStop ? perStop : 0));
+    const effectivePayload = backhaul ? (2 * payload) : payload;
+    const perT = isNaN(tripEur) ? NaN : (tripEur / effectivePayload);
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${p.name}</td>
+      <td>${isNaN(d) ? '-' : d.toFixed(1)}</td>
+      <td>${isNaN(tripEur) ? '-' : ('€' + tripEur.toFixed(2))}</td>
+      <td>${isNaN(perT) ? '-' : ('€' + perT.toFixed(2))}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+if (updatePortsBtn) updatePortsBtn.addEventListener('click', renderPortsTable);
+
+if (exportPortsBtn) exportPortsBtn.addEventListener('click', function () {
+  const rows = [];
+  rows.push(['Port','Distance HQ-port (km)','€/trip (return)','€/t (one way)']);
+  document.querySelectorAll('#portsTable tbody tr').forEach(function (tr) {
+    const tds = tr.querySelectorAll('td');
+    rows.push([tds[0].textContent, tds[1].textContent, tds[2].textContent, tds[3].textContent]);
+  });
+
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'ports_costs.csv';
+  a.click();
+});
+
+// ----- Init -----
+function init() {
+  setHqBadge();
+
+  // populate county dropdown
+  if (countySel) {
+    const counties = Array.from(new Set((GARAGES || []).map(r => garageArea(r)).filter(Boolean))).sort();
+    countySel.innerHTML = '<option value="">All counties</option>' +
+      counties.map(c => `<option value="${c}">${c}</option>`).join('');
+  }
+
+  computeDistances();
+  drawRings();
+  applyFilters();
+  renderPortsTable();
+}
+
+init();
+
+/* ==== END APP ==== */
+</script>
+</body>
+</html>
