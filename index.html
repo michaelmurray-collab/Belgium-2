@@ -517,6 +517,8 @@ function updateCostSummary() {
   const fixed   = parseFloat(fixedEl?.value || '0');
   const perStop = parseFloat(perStopEl?.value || '0');
   const pickups = Math.max(1, parseFloat(pickupsEl?.value || '1'));
+  const payload = Math.max(1, parseFloat(payloadEl?.value || '24'));
+
 
   const rows = document.querySelectorAll('#costTable tbody tr');
 
@@ -532,9 +534,11 @@ function updateCostSummary() {
 
     const avg = mean(distances);
     const tripEur = isNaN(avg) ? NaN : (2 * avg * (fuel + fixed) + perStop);
-    const perT = isNaN(tripEur) ? NaN : (tripEur / pickups);
+    const perT = isNaN(tripEur) ? NaN : (tripEur / payload);
 
-    const eurYearBand = isNaN(tripEur) ? 0 : (tripEur * sites);
+
+    const eurYearBand = isNaN(tripEur) ? 0 : (tripEur * sites * pickups);
+
     totalYear += eurYearBand;
 
     const tds = row.querySelectorAll('td');
